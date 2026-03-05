@@ -1,0 +1,87 @@
+batch_size: 64
+clip_len: 100
+feature_cols:
+- volt_V1
+- volt_V2
+- volt_V3
+- current_A1
+- current_A2
+- current_A3
+- power_kW
+- power_factor
+- motor_temp_C
+latent_channels: 16
+lr: 0.0001
+num_workers: 2
+scaler: !!python/object:sklearn.preprocessing._data.StandardScaler
+  _sklearn_version: 1.8.0
+  copy: true
+  mean_: !!python/object/apply:numpy._core.multiarray._reconstruct
+    args:
+    - &id002 !!python/name:numpy.ndarray ''
+    - !!python/tuple
+      - 0
+    - !!binary |
+      Yg==
+    state: !!python/tuple
+    - 1
+    - !!python/tuple
+      - 9
+    - &id001 !!python/object/apply:numpy.dtype
+      args:
+      - f8
+      - false
+      - true
+      state: !!python/tuple
+      - 3
+      - <
+      - null
+      - null
+      - null
+      - -1
+      - -1
+      - 0
+    - false
+    - !!binary |
+      LTjEfRgAeUCs32npmv94QMVLKYHe/3hAd40RSIQCN0A56HJ1P/82QBsUJ8BtAjdAiMv1fIwBLEBq
+      1A7M2s3sP96nF2fhgE9A
+  n_features_in_: 9
+  n_samples_seen_: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    AAAAAABiy0A=
+  scale_: !!python/object/apply:numpy._core.multiarray._reconstruct
+    args:
+    - *id002
+    - !!python/tuple
+      - 0
+    - !!binary |
+      Yg==
+    state: !!python/tuple
+    - 1
+    - !!python/tuple
+      - 9
+    - *id001
+    - false
+    - !!binary |
+      5C6kCbIRCEAdf6Y2avUHQH63bVy2DAhAwgHC18kW8z9l+P003S7zPyuPZ+HJO/M/AWr5LJG06T+F
+      XF9vfFqOPw5+sEKs+e8/
+  var_: !!python/object/apply:numpy._core.multiarray._reconstruct
+    args:
+    - *id002
+    - !!python/tuple
+      - 0
+    - !!binary |
+      Yg==
+    state: !!python/tuple
+    - 1
+    - !!python/tuple
+      - 9
+    - *id001
+    - false
+    - !!binary |
+      DhB/15QaIkChtlTSIvAhQPIheZcWEyJA+WFw1T/G9j/bKr6h1v/2P3iLJ+LeHvc/XksSuh2m5D+J
+      JqkuqcosP1kco8VZ8+8/
+  with_mean: true
+  with_std: true
+stride: 10

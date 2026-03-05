@@ -1,0 +1,848 @@
+# Project Code Dump: C:\Users\lenovo\Documents\Thesis\thesis\GCL\Thesis_2\GCL_V1
+# Generated on: C:\Users\lenovo\Documents\Thesis\thesis\GCL\Thesis_2\GCL_V1
+
+
+
+===== FILE: code_dump.py =====
+
+# smart_project_dump.py
+import os
+
+root = "C:\\Users\\lenovo\\Documents\\Thesis\\thesis\\GCL\\Thesis_2\\GCL_V1"  # Change this to your project root if needed
+output_file = "project_dump.txt"
+
+# Directories and files to completely skip
+EXCLUDE_DIRS = {
+    "node_modules",
+    "__pycache__",
+    ".git",
+    ".next",          # Next.js build/cache
+    "build",
+    "dist",
+    "out",
+    "coverage",
+    ".vscode",
+    ".idea",
+    "venv",
+    ".venv",
+    "env",
+    ".env",
+    "public",         # usually static assets, optional
+    "static",
+    "data",
+    "lightning_logs",
+    "results",
+    # Django/static files
+}
+
+# File patterns to skip (even if in allowed folders)
+EXCLUDE_FILES = {
+    ".log",
+    ".env",
+    ".env.local",
+    ".env.development",
+    ".env.production",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    ".DS_Store",
+    "Thumbs.db",
+}
+
+# Only include these extensions (add more if needed)
+INCLUDE_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".json", ".md", ".html", ".css", ".scss", ".yaml", ".yml", ".env.example"}
+
+def should_include_file(filename):
+    _, ext = os.path.splitext(filename)
+    return ext.lower() in INCLUDE_EXTENSIONS
+
+def should_exclude_path(path):
+    parts = path.replace("\\", "/").split("/")  # Normalize for Windows
+    return any(part in EXCLUDE_DIRS for part in parts) or any(part.startswith(".git") for part in parts)
+
+with open(output_file, "w", encoding="utf-8") as out:
+    out.write(f"# Project Code Dump: {root}\n")
+    out.write(f"# Generated on: {os.path.abspath(root)}\n\n")
+
+    for current_folder, dirs, files in os.walk(root):
+        # Skip excluded directories in-place (modifies dirs to prevent walking into them)
+        dirs[:] = [d for d in dirs if not should_exclude_path(os.path.join(current_folder, d))]
+
+        if should_exclude_path(current_folder):
+            continue
+
+        for file in files:
+            if file in EXCLUDE_FILES or file.startswith("."):
+                continue
+            if not should_include_file(file):
+                continue
+
+            filepath = os.path.join(current_folder, file)
+            rel_path = os.path.relpath(filepath, root)
+
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception as e:
+                content = f"[ERROR READING FILE: {e}]"
+
+            out.write(f"\n\n===== FILE: {rel_path} =====\n\n")
+            out.write(content)
+
+print(f"Code dump successfully written to {output_file}")
+print("Excluded: node_modules, .git, build folders, lockfiles, env files, etc.")
+
+===== FILE: scripts\evaluate.py =====
+
+
+
+===== FILE: scripts\inference.py =====
+
+import torch
+import pandas as pd
+import matplotlib.pyplot as plt
+import joblib
+
+from src.config import *
+from src.lightning.gcl_module import GCLConv1DUnsupervised
+from src.datasets.sensor_dataset import SensorDataset
+import numpy as np
+
+from src.utils.reconstruction import feature_contribution
+from src.utils.fault_signature import (
+    create_signature,
+    extract_anomaly_signatures,
+    cluster_signatures,
+    save_fault_library,
+    classify_new_signature
+)
+from src.utils.visualization import plot_signature_pca
+
+def load_model(checkpoint_path, scaler, test_dataset=None):
+    model = GCLConv1DUnsupervised(
+        scaler=scaler,
+        feature_cols=FEATURE_COLS,
+        clip_len=CLIP_LEN,
+        stride=STRIDE,
+        batch_size=BATCH_SIZE,
+        latent_channels=LATENT_CHANNELS,
+        test_dataset=test_dataset
+    )
+
+    # PyTorch 2.6+: weights_only=False
+    state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=False)["state_dict"]
+    model.load_state_dict(state_dict)
+    model.eval()
+    return model
+
+def run_inference(model, df, scaler):
+    dataset = SensorDataset(df, scaler, FEATURE_COLS, CLIP_LEN, STRIDE, split="test")
+    loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
+
+    all_global_errors = []
+    all_per_feature_errors = []
+    all_contributions = []
+
+
+    with torch.no_grad():
+        for batch in loader:
+            x = batch
+            x_hat, _ = model(x)
+
+            global_err = torch.mean((x - x_hat) ** 2, dim=(1, 2))
+            per_feat_err = torch.mean((x - x_hat) ** 2, dim=1)
+            contrib = per_feat_err / (per_feat_err.sum(dim=1, keepdim=True) + 1e-8)
+
+            all_global_errors.append(global_err.item())
+            all_per_feature_errors.append(per_feat_err.squeeze().numpy())
+            all_contributions.append(contrib.squeeze().numpy())
+
+    return all_global_errors, all_per_feature_errors, all_contributions
+
+def visualize_results(global_errors, per_feature_errors):
+    plt.figure(figsize=(6,4))
+    plt.plot(global_errors)
+    plt.axhline(np.mean(global_errors), linestyle='--')
+    plt.title("Global Reconstruction Error (All Windows)")
+    plt.ylabel("MSE")
+    plt.xlabel("Window Index")
+    plt.show()
+
+    per_feature_errors = pd.DataFrame(per_feature_errors, columns=FEATURE_COLS)
+    plt.figure()
+    per_feature_errors.mean().plot(kind='bar')
+    plt.title("Average Per-Feature Reconstruction Error")
+    plt.show()
+
+def main():
+    df = pd.read_csv("data/raw/test1.csv")
+    scaler = joblib.load("scalers/scaler.save")
+
+    dataset = SensorDataset(df, scaler, FEATURE_COLS, CLIP_LEN, STRIDE, split="test")
+
+    checkpoint_path = "checkpoints/gcl-epoch=39-val_recon_loss=0.0000.ckpt"
+    model = load_model(checkpoint_path, scaler, test_dataset=dataset)
+
+    global_errors, per_feature_errors, contributions = run_inference(model, df, scaler)
+
+    # -------------------------------------------------
+    # 🔥 STEP 1: Extract anomaly signatures
+    # -------------------------------------------------
+    healthy_errors = pd.read_csv("results/global_reconstruction_error.csv")
+    healthy_errors = healthy_errors["global_reconstruction_error"].values
+
+    mu = np.mean(healthy_errors)
+    sigma = np.std(healthy_errors)
+    threshold = mu + 3 * sigma
+
+    print(f"Anomaly Threshold: {threshold}")
+
+    signatures, indices = [], []
+
+    for idx, (g, c) in enumerate(zip(global_errors, contributions)):
+        if g > threshold:
+            signatures.append(create_signature(c, g))
+            indices.append(idx)
+
+    print(f"Total Anomalies Detected: {len(signatures)}")
+    # =====================================================
+    # 🔷 CASE 1: If multiple anomalies → cluster + save
+    # =====================================================
+    if len(signatures) > 1:
+
+        # STEP 2: Cluster signatures
+        labels, centroids, sil_score = cluster_signatures(signatures)
+
+        print("Clusters discovered:", len(centroids))
+        print("Silhouette Score:", sil_score)
+
+        # STEP 3: Save Fault Prototype Library
+        save_fault_library(centroids, sil_score)
+        print("Fault Prototype Library Saved.")
+
+    else:
+        print("Not enough anomalies to cluster.")
+
+    # =====================================================
+    # 🔷 STEP 4: CLASSIFY USING EXISTING LIBRARY
+    # =====================================================
+    try:
+        print("\n--- Fault Classification Results ---")
+
+        for i, sig in enumerate(signatures):
+            result = classify_new_signature(sig)
+
+            print(f"Anomaly {indices[i]} → {result}")
+
+    except Exception as e:
+        print("Fault library not found or classification error:", e)
+
+    visualize_results(global_errors, per_feature_errors)
+if __name__ == "__main__":
+    main()
+
+
+===== FILE: scripts\train.py =====
+
+import os
+import pandas as pd
+import joblib
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelCheckpoint
+
+from src.config import *
+from src.lightning.gcl_module import GCLConv1DUnsupervised
+from src.datasets.sensor_dataset import SensorDataset
+from src.utils.preprocessing import fit_scaler_on_train
+
+def main():
+    os.makedirs("checkpoints", exist_ok=True)
+    os.makedirs("scalers", exist_ok=True)
+
+    # Load data
+    df = pd.read_csv("data/raw/55kw_motor_data.csv")
+
+    # Fit scaler
+    scaler = fit_scaler_on_train(df, FEATURE_COLS, CLIP_LEN, STRIDE)
+    joblib.dump(scaler, "scalers/scaler.save")
+
+    # Create datasets
+    train_ds = SensorDataset(df, scaler, FEATURE_COLS, CLIP_LEN, STRIDE, split="train")
+    val_ds = SensorDataset(df, scaler, FEATURE_COLS, CLIP_LEN, STRIDE, split="val")
+
+    # Instantiate model
+    model = GCLConv1DUnsupervised(
+        scaler=scaler,
+        feature_cols=FEATURE_COLS,
+        clip_len=CLIP_LEN,
+        stride=STRIDE,
+        batch_size=BATCH_SIZE,
+        lr=LR,
+        latent_channels=LATENT_CHANNELS,
+        train_dataset=train_ds,
+        val_dataset=val_ds
+    )
+
+    checkpoint_callback = ModelCheckpoint(
+        dirpath="checkpoints",
+        filename="gcl-{epoch:02d}-{val_recon_loss:.4f}",
+        monitor="val/recon_loss",
+        mode="min",
+        save_top_k=1,
+        save_weights_only=True
+    )
+
+    trainer = pl.Trainer(
+        max_epochs=40,
+        callbacks=[checkpoint_callback],
+        accelerator="auto",
+        devices=1,
+        enable_progress_bar=True
+    )
+
+    trainer.fit(model)
+    print("✅ Training complete! Best model saved at:", checkpoint_callback.best_model_path)
+
+if __name__ == "__main__":
+    main()
+
+
+===== FILE: scripts\__init__.py =====
+
+
+
+===== FILE: src\config.py =====
+
+FEATURE_COLS = [
+    'volt_V1','volt_V2','volt_V3',
+    'current_A1','current_A2','current_A3',
+    'power_kW','power_factor','motor_temp_C'
+]
+
+CLIP_LEN = 100
+STRIDE = 10
+BATCH_SIZE = 64
+LR = 1e-4
+LATENT_CHANNELS = 16
+
+
+===== FILE: src\__init__.py =====
+
+
+
+===== FILE: src\datasets\sensor_dataset.py =====
+
+import numpy as np
+import torch
+from torch.utils.data import Dataset
+
+class SensorDataset(Dataset):
+    def __init__(self, df, scaler, feature_cols, clip_len, stride, split='train'):
+        X = scaler.transform(df[feature_cols].values.astype(np.float32))
+
+        windows = []
+        for i in range(0, len(X) - clip_len + 1, stride):
+            windows.append(X[i:i+clip_len])
+
+        windows = np.stack(windows)
+
+        n = len(windows)
+        n_train = int(0.7 * n)
+        n_val = int(0.85 * n)
+
+        if split == 'train':
+            windows = windows[:n_train]
+        elif split == 'val':
+            windows = windows[n_train:n_val]
+        else:
+            windows = windows[n_val:]
+
+        self.data = torch.tensor(windows, dtype=torch.float32)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+
+===== FILE: src\datasets\__init__.py =====
+
+
+
+===== FILE: src\lightning\gcl_module.py =====
+
+# src/lightning/gcl_module.py
+import os
+import torch
+import torch.nn as nn
+import pytorch_lightning as pl
+import pandas as pd
+from torch.utils.data import DataLoader
+
+from src.models.autoencoder import SimpleConv1DAutoencoder
+from src.models.discriminator import SimpleConv1DDiscriminator
+from src.datasets.sensor_dataset import SensorDataset
+from src.utils.reconstruction import (
+    global_reconstruction_error,
+    per_feature_reconstruction_error,
+    feature_contribution
+)
+
+class GCLConv1DUnsupervised(pl.LightningModule):
+
+    def __init__(
+        self,
+        scaler,
+        feature_cols,
+        clip_len=100,
+        batch_size=32,
+        lr=1e-4,
+        latent_channels=16,
+        stride=10,
+        num_workers=2,
+        train_dataset=None,
+        val_dataset=None,
+        test_dataset=None
+    ):
+        super().__init__()
+        self.automatic_optimization = False
+        self.save_hyperparameters()
+
+        self.scaler = scaler
+        self.feature_cols = feature_cols
+        self.clip_len = clip_len
+        self.stride = stride
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
+        self.test_dataset = test_dataset
+
+        n_features = len(self.feature_cols)
+
+        self.generator = SimpleConv1DAutoencoder(
+            n_features=n_features,
+            latent_channels=latent_channels
+        )
+        self.discriminator = SimpleConv1DDiscriminator(n_features=n_features)
+
+        self.mse = nn.MSELoss()
+        self.bce_logits = nn.BCEWithLogitsLoss()
+        self.validation_outputs = []
+
+    # ---------------- Forward ----------------
+    def forward(self, x):
+        x_conv = x.permute(0, 2, 1)  # (B, n_features, clip_len)
+        x_hat_conv, z = self.generator(x_conv)
+        x_hat = x_hat_conv.permute(0, 2, 1)  # (B, clip_len, n_features)
+        return x_hat, z
+
+    # ---------------- Training Step ----------------
+    def training_step(self, batch, batch_idx):
+        x = batch
+        device = x.device
+        opt_d, opt_g = self.optimizers()
+
+        x_conv = x.permute(0, 2, 1)
+
+        # ----- Discriminator -----
+        x_hat_conv, _ = self.generator(x_conv)
+        real_logits = self.discriminator(x_conv)
+        fake_logits = self.discriminator(x_hat_conv.detach())
+
+        real_labels = torch.ones_like(real_logits, device=device)
+        fake_labels = torch.zeros_like(fake_logits, device=device)
+
+        d_loss_real = self.bce_logits(real_logits, real_labels)
+        d_loss_fake = self.bce_logits(fake_logits, fake_labels)
+        d_loss = 0.5 * (d_loss_real + d_loss_fake)
+
+        opt_d.zero_grad()
+        self.manual_backward(d_loss)
+        opt_d.step()
+
+        # ----- Generator -----
+        x_hat_conv, _ = self.generator(x_conv)
+        fake_logits = self.discriminator(x_hat_conv)
+        adv_loss = self.bce_logits(fake_logits, torch.ones_like(fake_logits, device=device))
+
+        x_hat = x_hat_conv.permute(0, 2, 1)
+        recon_loss = self.mse(x_hat, x)
+        g_loss = recon_loss + 1e-3 * adv_loss
+
+        opt_g.zero_grad()
+        self.manual_backward(g_loss)
+        opt_g.step()
+
+        self.log_dict({
+            "train/d_loss": d_loss,
+            "train/g_loss": g_loss,
+            "train/recon_loss": recon_loss
+        }, prog_bar=True)
+
+    # ---------------- Validation Step ----------------
+    def validation_step(self, batch, batch_idx):
+        x = batch
+        x_hat, _ = self(x)
+        global_err = global_reconstruction_error(x, x_hat)
+        per_feat_err = per_feature_reconstruction_error(x, x_hat)
+        contrib = feature_contribution(per_feat_err)
+
+        self.validation_outputs.append({
+            "global_error": global_err.detach().cpu(),
+            "per_feature_error": per_feat_err.detach().cpu(),
+            "contribution": contrib.detach().cpu()
+        })
+        self.log("val/recon_loss", global_err.mean(), prog_bar=True)
+
+    def on_validation_epoch_end(self):
+        if not self.validation_outputs:
+            return
+
+        os.makedirs("results", exist_ok=True)
+
+        all_global = torch.cat([o["global_error"] for o in self.validation_outputs]).numpy()
+        all_per_feat = torch.cat([o["per_feature_error"] for o in self.validation_outputs]).numpy()
+        all_contrib = torch.cat([o["contribution"] for o in self.validation_outputs]).numpy()
+
+        pd.DataFrame({"global_reconstruction_error": all_global}).to_csv(
+            "results/global_reconstruction_error.csv", index=False
+        )
+        pd.DataFrame(all_per_feat, columns=self.feature_cols).to_csv(
+            "results/per_feature_reconstruction_error.csv", index=False
+        )
+        pd.DataFrame(all_contrib, columns=self.feature_cols).to_csv(
+            "results/feature_contribution.csv", index=False
+        )
+        print("✅ Validation results saved in results/ folder")
+        self.validation_outputs.clear()
+
+    # ---------------- Optimizers ----------------
+    def configure_optimizers(self):
+        opt_d = torch.optim.Adam(self.discriminator.parameters(), lr=self.hparams.lr)
+        opt_g = torch.optim.Adam(self.generator.parameters(), lr=self.hparams.lr)
+        return [opt_d, opt_g]
+
+    # ---------------- DataLoaders ----------------
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers
+        )
+
+    def test_dataloader(self):
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers
+        )
+
+
+===== FILE: src\lightning\__init__.py =====
+
+
+
+===== FILE: src\models\autoencoder.py =====
+
+import torch.nn as nn
+
+class SimpleConv1DAutoencoder(nn.Module):
+    def __init__(self, n_features, latent_channels):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Conv1d(n_features, 64, 3, padding=1),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Conv1d(64, latent_channels, 3, padding=1),
+            nn.BatchNorm1d(latent_channels),
+            nn.ReLU(),
+        )
+        self.decoder = nn.Sequential(
+            nn.Conv1d(latent_channels, 64, 3, padding=1),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Conv1d(64, n_features, 3, padding=1),
+        )
+
+    def forward(self, x):
+        z = self.encoder(x)
+        x_hat = self.decoder(z)
+        return x_hat, z
+
+
+===== FILE: src\models\discriminator.py =====
+
+import torch.nn as nn
+
+class SimpleConv1DDiscriminator(nn.Module):
+    def __init__(self, n_features):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv1d(n_features, 32, 3, padding=1),
+            nn.LeakyReLU(0.2),
+            nn.Conv1d(32, 64, 3, padding=1),
+            nn.LeakyReLU(0.2),
+        )
+        self.classifier = nn.Sequential(
+            nn.Linear(64, 32),
+            nn.LeakyReLU(0.2),
+            nn.Linear(32, 1),
+        )
+
+    def forward(self, x):
+        h = self.conv(x).mean(dim=-1)
+        return self.classifier(h)
+
+
+===== FILE: src\models\__init__.py =====
+
+
+
+===== FILE: src\utils\fault_signature.py =====
+
+import numpy as np
+import pandas as pd
+import joblib
+from sklearn.cluster import AgglomerativeClustering, KMeans
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics import silhouette_score
+import pickle
+import os
+
+
+# -------------------------------------------------
+# 1️⃣ Create Fault Signature Vector
+# (Using feature contribution for stability)
+# -------------------------------------------------
+def create_signature(contribution_vector, global_error=None):
+
+    vec = np.array(contribution_vector)
+
+    # Direction component
+    direction = vec / (np.linalg.norm(vec) + 1e-8)
+
+    if global_error is None:
+        return direction
+
+    # Magnitude component (severity)
+    severity = np.array([global_error])
+
+    # Combine direction + magnitude
+    signature = np.concatenate([direction, severity])
+
+    return signature
+
+
+# -------------------------------------------------
+# 2️⃣ Extract anomaly signatures
+# -------------------------------------------------
+def extract_anomaly_signatures(global_errors,
+                               contributions,
+                               percentile_threshold=95):
+
+    threshold = np.percentile(global_errors, percentile_threshold)
+
+    signatures = []
+    indices = []
+
+    for idx, (g, c) in enumerate(zip(global_errors, contributions)):
+        if g > threshold:
+            signatures.append(create_signature(c))
+            indices.append(idx)
+
+    return np.array(signatures), indices, threshold
+
+
+# -------------------------------------------------
+# 3️⃣ Cluster Fault Signatures
+# -------------------------------------------------
+def cluster_signatures(signatures, max_k=6):
+
+    signatures = np.array(signatures)
+
+    n_samples = len(signatures)
+
+    # Not enough data
+    if n_samples < 2:
+        return None, None, None
+
+    best_score = -1
+    best_labels = None
+    best_kmeans = None
+
+    # k must be < n_samples
+    max_allowed_k = min(max_k, n_samples - 1)
+
+    for k in range(2, max_allowed_k + 1):
+
+        kmeans = KMeans(n_clusters=k, random_state=42)
+        labels = kmeans.fit_predict(signatures)
+
+        score = silhouette_score(signatures, labels, metric="cosine")
+
+        if score > best_score:
+            best_score = score
+            best_labels = labels
+            best_kmeans = kmeans
+
+    return best_labels, best_kmeans.cluster_centers_, best_score
+
+
+# -------------------------------------------------
+# 4️⃣ Save Fault Prototype Library
+# -------------------------------------------------
+def save_fault_library(centroids,
+                       silhouette_score=None,
+                       path="results/fault_prototype_library.pkl"):
+
+    fault_library = {
+        "centroids": np.array(centroids),
+        "num_clusters": len(centroids),
+        "silhouette_score": silhouette_score
+    }
+
+    with open(path, "wb") as f:
+        pickle.dump(fault_library, f)
+
+    print("✅ Fault library saved correctly at:", path)
+
+
+def load_fault_library(path="results/fault_prototype_library.pkl"):
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+def load_fault_library(path="results/fault_prototype_library.pkl"):
+    return joblib.load(path)
+
+
+# -------------------------------------------------
+# 5️⃣ Real-Time Classification
+# -------------------------------------------------
+def classify_new_signature(signature,
+                           library_path="results/fault_prototype_library.pkl",
+                           similarity_threshold=0.75):
+
+    if not os.path.exists(library_path):
+        return {"status": "Library Not Found"}
+
+    # Normalize
+    signature = signature / (np.linalg.norm(signature) + 1e-8)
+
+    fault_lib = load_fault_library(library_path)
+    centroids = fault_lib["centroids"]
+
+    similarities = cosine_similarity(
+        signature.reshape(1, -1),
+        centroids
+    )
+
+    best_idx = np.argmax(similarities)
+    best_score = similarities[0, best_idx]
+
+    if best_score >= similarity_threshold:
+        return {
+            "status": "Known Fault",
+            "cluster": int(best_idx),
+            "confidence": float(best_score)
+        }
+    else:
+        return {
+            "status": "Unknown Fault",
+            "cluster": None,
+            "confidence": float(best_score)
+        }
+
+===== FILE: src\utils\preprocessing.py =====
+
+from sklearn.preprocessing import StandardScaler
+
+def fit_scaler_on_train(df, feature_cols, clip_len, stride):
+    L = len(df)
+    starts = list(range(0, L - clip_len + 1, stride))
+    n_train = int(0.7 * len(starts))
+    last_start = starts[n_train - 1]
+    train_rows = df.iloc[:last_start + clip_len]
+
+    scaler = StandardScaler()
+    scaler.fit(train_rows[feature_cols].values)
+    return scaler
+
+
+===== FILE: src\utils\reconstruction.py =====
+
+import torch
+
+def global_reconstruction_error(x, x_hat):
+    # mean over time and features
+    return torch.mean((x - x_hat) ** 2, dim=(1, 2))
+
+
+def per_feature_reconstruction_error(x, x_hat):
+    # mean over time dimension only
+    # x shape: (B, clip_len, n_features)
+    sq_err = (x - x_hat) ** 2
+    return torch.mean(sq_err, dim=1)   # (B, n_features)
+
+
+def feature_contribution(per_feature_error):
+    # normalize across features
+    return per_feature_error / (
+        per_feature_error.sum(dim=1, keepdim=True) + 1e-8
+    )
+
+
+===== FILE: src\utils\visualization.py =====
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+
+
+def plot_signature_pca(signatures, labels):
+    """
+    signatures: numpy array (N_anomalies, n_features)
+    labels: cluster labels from clustering
+    """
+
+    pca = PCA(n_components=2)
+    reduced = pca.fit_transform(signatures)
+
+    plt.figure(figsize=(8, 6))
+
+    unique_labels = np.unique(labels)
+
+    for lab in unique_labels:
+        idx = labels == lab
+        plt.scatter(
+            reduced[idx, 0],
+            reduced[idx, 1],
+            label=f"Cluster {lab}",
+            s=80
+        )
+
+    plt.xlabel("Principal Component 1")
+    plt.ylabel("Principal Component 2")
+    plt.title("PCA Visualization of Fault Signature Clusters")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    print("Explained variance ratio:", pca.explained_variance_ratio_)
+
+
+===== FILE: src\utils\__init__.py =====
+
