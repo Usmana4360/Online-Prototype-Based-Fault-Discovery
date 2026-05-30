@@ -2,11 +2,15 @@ import torch
 import pandas as pd
 import matplotlib.pyplot as plt
 import joblib
+import json
 
 from src.config import *
 from src.lightning.gcl_module import GCLConv1DUnsupervised
 from src.datasets.sensor_dataset import SensorDataset
 import numpy as np
+from src.utils.trend_detector import early_warning_check
+from src.utils.error_forecaster import predict_future_errors
+from src.datasets.sensor_dataset import InferenceDataset
 
 from src.utils.reconstruction import feature_contribution
 from src.utils.fault_signature import (
@@ -36,23 +40,21 @@ def load_model(checkpoint_path, scaler, test_dataset=None):
     return model
 
 def run_inference(model, df, scaler):
-    dataset = SensorDataset(df, scaler, FEATURE_COLS, CLIP_LEN, STRIDE, split="test")
-    loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
+    # ← use InferenceDataset instead of SensorDataset
+    dataset = InferenceDataset(df, scaler, FEATURE_COLS, CLIP_LEN, STRIDE)
+    loader  = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
 
-    all_global_errors = []
+    all_global_errors     = []
     all_per_feature_errors = []
-    all_contributions = []
-
+    all_contributions     = []
 
     with torch.no_grad():
         for batch in loader:
             x = batch
             x_hat, _ = model(x)
-
-            global_err = torch.mean((x - x_hat) ** 2, dim=(1, 2))
+            global_err   = torch.mean((x - x_hat) ** 2, dim=(1, 2))
             per_feat_err = torch.mean((x - x_hat) ** 2, dim=1)
-            contrib = per_feat_err / (per_feat_err.sum(dim=1, keepdim=True) + 1e-8)
-
+            contrib      = per_feat_err / (per_feat_err.sum(dim=1, keepdim=True) + 1e-8)
             all_global_errors.append(global_err.item())
             all_per_feature_errors.append(per_feat_err.squeeze().numpy())
             all_contributions.append(contrib.squeeze().numpy())
@@ -75,15 +77,15 @@ def visualize_results(global_errors, per_feature_errors):
     plt.show()
 
 def main():
-    df = pd.read_csv("data/raw/test1.csv")
+    df = pd.read_csv("data/raw/motor_data_200_drifts_labeled.csv")
     scaler = joblib.load("scalers/scaler.save")
 
-    dataset = SensorDataset(df, scaler, FEATURE_COLS, CLIP_LEN, STRIDE, split="test")
-
     checkpoint_path = "checkpoints/gcl-epoch=39-val_recon_loss=0.0000.ckpt"
-    model = load_model(checkpoint_path, scaler, test_dataset=dataset)
+    model = load_model(checkpoint_path, scaler)
 
     global_errors, per_feature_errors, contributions = run_inference(model, df, scaler)
+    np.savetxt("results/test_errors.csv", global_errors, delimiter=",")
+
 
     # -------------------------------------------------
     # 🔥 STEP 1: Extract anomaly signatures
@@ -91,11 +93,41 @@ def main():
     healthy_errors = pd.read_csv("results/global_reconstruction_error.csv")
     healthy_errors = healthy_errors["global_reconstruction_error"].values
 
+
     mu = np.mean(healthy_errors)
     sigma = np.std(healthy_errors)
     threshold = mu + 3 * sigma
 
     print(f"Anomaly Threshold: {threshold}")
+
+    # ── NEW: ANOMALY PREDICTION BLOCK ───────────────────────────────
+
+    # 1. Rolling early-warning check across the whole test run
+    print("\n========== ANOMALY PREDICTION REPORT ==========")
+    for i in range(1, len(global_errors) + 1):
+        result = early_warning_check(
+            global_errors[:i], mu, sigma,
+            warn_multiplier=1.0,
+            slope_threshold=0.0003,
+            trend_window=15
+        )
+        if result["status"] != "NORMAL":
+            print(f"Window {i:4d} | {result['status']:7s} | {result['reason']}")
+
+    # 2. Predict future errors using the LSTM (if trained)
+    try:
+        future_errors = predict_future_errors(global_errors)
+        print(f"\n--- LSTM Forecast (next {len(future_errors)} windows) ---")
+        for step, val in enumerate(future_errors, 1):
+            level = ("ALARM" if val > mu + 3*sigma
+                     else "WARNING" if val > mu + 2*sigma
+                     else "normal")
+            print(f"  +{step:2d} windows: predicted error = {val:.5f}  [{level}]")
+    except FileNotFoundError:
+        print("\n(No LSTM forecaster found — run train_forecaster() first)")
+
+    print("================================================\n")
+    # ── END PREDICTION BLOCK ────────────────────────────────────────
 
     signatures, indices = [], []
 
@@ -105,9 +137,7 @@ def main():
             indices.append(idx)
 
     print(f"Total Anomalies Detected: {len(signatures)}")
-    # =====================================================
-    # 🔷 CASE 1: If multiple anomalies → cluster + save
-    # =====================================================
+    #  CASE 1: If multiple anomalies → cluster + savepython -m scripts.inference
     if len(signatures) > 1:
 
         # STEP 2: Cluster signatures

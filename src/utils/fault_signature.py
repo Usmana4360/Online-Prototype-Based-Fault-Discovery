@@ -45,7 +45,7 @@ def extract_anomaly_signatures(global_errors,
 
     for idx, (g, c) in enumerate(zip(global_errors, contributions)):
         if g > threshold:
-            signatures.append(create_signature(c))
+            signatures.append(create_signature(c,g))
             indices.append(idx)
 
     return np.array(signatures), indices, threshold
@@ -108,10 +108,6 @@ def save_fault_library(centroids,
 def load_fault_library(path="results/fault_prototype_library.pkl"):
     with open(path, "rb") as f:
         return pickle.load(f)
-
-def load_fault_library(path="results/fault_prototype_library.pkl"):
-    return joblib.load(path)
-
 
 # -------------------------------------------------
 # 5️⃣ Real-Time Classification

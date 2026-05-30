@@ -30,3 +30,27 @@ class SensorDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.data[idx]
+
+class InferenceDataset(Dataset):
+    """
+    Use this for inference on a separate test file.
+    Uses ALL windows — no train/val/test split applied.
+    This is the correct way to run inference on test1.csv.
+    """
+    def __init__(self, df, scaler, feature_cols, clip_len, stride):
+        X = scaler.transform(df[feature_cols].values.astype(np.float32))
+
+        windows = []
+        for i in range(0, len(X) - clip_len + 1, stride):
+            windows.append(X[i:i+clip_len])
+
+        print(f"[InferenceDataset] {len(df)} rows → {len(windows)} windows "
+              f"(clip_len={clip_len}, stride={stride})")
+
+        self.data = torch.tensor(np.stack(windows), dtype=torch.float32)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx]

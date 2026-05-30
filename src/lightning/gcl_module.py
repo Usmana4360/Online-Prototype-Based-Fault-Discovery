@@ -33,7 +33,7 @@ class GCLConv1DUnsupervised(pl.LightningModule):
     ):
         super().__init__()
         self.automatic_optimization = False
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["scaler", "train_dataset", "val_dataset", "test_dataset"])
 
         self.scaler = scaler
         self.feature_cols = feature_cols
@@ -150,6 +150,19 @@ class GCLConv1DUnsupervised(pl.LightningModule):
         opt_d = torch.optim.Adam(self.discriminator.parameters(), lr=self.hparams.lr)
         opt_g = torch.optim.Adam(self.generator.parameters(), lr=self.hparams.lr)
         return [opt_d, opt_g]
+    
+    def test_step(self, batch, batch_idx):
+        x = batch
+        x_hat, z = self(x)
+        global_err = global_reconstruction_error(x, x_hat)
+        per_feat_err = per_feature_reconstruction_error(x, x_hat)
+        contrib = feature_contribution(per_feat_err)
+        self.log("test/recon_loss", global_err.mean(), prog_bar=True)
+        return {
+            "global_error": global_err.detach().cpu(),
+            "per_feature_error": per_feat_err.detach().cpu(),
+            "contribution": contrib.detach().cpu(),
+        }
 
     # ---------------- DataLoaders ----------------
     def train_dataloader(self):

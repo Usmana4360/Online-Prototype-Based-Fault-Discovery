@@ -1,0 +1,9 @@
+{
+  "method": "3-Sigma SPC",
+  "roc_auc": 0.5039,
+  "pr_auc": 0.0372,
+  "f1": 0.0688,
+  "mcc": 0.0029,
+  "precision": 0.0359,
+  "recall": 0.831
+}

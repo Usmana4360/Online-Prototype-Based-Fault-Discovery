@@ -8,7 +8,17 @@ from src.config import *
 from src.lightning.gcl_module import GCLConv1DUnsupervised
 from src.datasets.sensor_dataset import SensorDataset
 from src.utils.preprocessing import fit_scaler_on_train
+import random
+import numpy as np
+import torch
 
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+torch.backends.cudnn.deterministic = True
+pl.seed_everything(SEED, workers=True)
 def main():
     os.makedirs("checkpoints", exist_ok=True)
     os.makedirs("scalers", exist_ok=True)
