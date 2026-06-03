@@ -42,6 +42,8 @@ def main():
     min_len  = min(len(scores), len(labels))
     scores   = scores[:min_len]
     labels   = labels[:min_len]
+    np.save("results/scores_spc.npy", scores)
+
 
     # Threshold at 3-sigma (z > 3 = anomaly)
     preds = (scores > 3.0).astype(int)

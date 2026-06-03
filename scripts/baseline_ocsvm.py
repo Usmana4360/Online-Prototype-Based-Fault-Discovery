@@ -50,6 +50,8 @@ def main():
     min_len = min(len(scores), len(labels))
     scores  = scores[:min_len]
     labels  = labels[:min_len]
+    np.save("results/scores_ocsvm.npy", scores)
+
 
     threshold = np.percentile(scores[:n_train], 95)
     preds     = (scores > threshold).astype(int)
@@ -61,7 +63,7 @@ def main():
         "f1"       : round(f1_score(labels, preds, zero_division=0), 4),
         "mcc"      : round(matthews_corrcoef(labels, preds), 4),
         "precision": round(precision_score(labels, preds, zero_division=0), 4),
-        "recall"   : round(recall_score(labels, preds, zero_division=0), 4),
+        "recall"   : round(recall_score(labels, preds, zero_division=0), 4)
     }
 
     print("\nOne-Class SVM Baseline Results:")

@@ -44,6 +44,7 @@ def main():
     min_len = min(len(scores), len(labels))
     scores  = scores[:min_len]
     labels  = labels[:min_len]
+    np.save("results/scores_iforest.npy", scores)
 
     # Threshold at 95th percentile of training scores
     train_scores = scores[:n_train]

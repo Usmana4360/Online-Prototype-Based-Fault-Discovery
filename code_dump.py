@@ -1,7 +1,7 @@
 # smart_project_dump.py
 import os
 
-root = "C:\\Users\\lenovo\\Documents\\Thesis\\thesis\\GCL\\Thesis_2\\GCL_V1"  # Change this to your project root if needed
+root = r"D:\Projects\anomaly_detection\Online-Prototype-Based-Fault-Discovery"  # Change this to your project root if needed
 output_file = "project_dump.txt"
 
 # Directories and files to completely skip
