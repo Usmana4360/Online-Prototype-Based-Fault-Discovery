@@ -1,3 +1,5 @@
+import os
+
 import torch
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -58,6 +60,7 @@ def run_inference(model, df, scaler):
             all_global_errors.append(global_err.item())
             all_per_feature_errors.append(per_feat_err.squeeze().numpy())
             all_contributions.append(contrib.squeeze().numpy())
+    print("Generated windows:", len(all_global_errors))
 
     return all_global_errors, all_per_feature_errors, all_contributions
 
@@ -82,9 +85,18 @@ def main():
 
     checkpoint_path = "checkpoints/gcl-epoch=39-val_recon_loss=0.0000.ckpt"
     model = load_model(checkpoint_path, scaler)
-
     global_errors, per_feature_errors, contributions = run_inference(model, df, scaler)
-    np.savetxt("results/test_errors.csv", global_errors, delimiter=",")
+    os.makedirs("results", exist_ok=True)
+
+    pd.DataFrame({
+        "global_reconstruction_error": global_errors
+    }).to_csv(
+        "results/global_reconstruction_error.csv",
+        index=False
+    )
+
+    print("Saved: results/global_reconstruction_error.csv")
+    print("Windows:", len(global_errors))
 
 
     # -------------------------------------------------
@@ -103,70 +115,74 @@ def main():
     # ── NEW: ANOMALY PREDICTION BLOCK ───────────────────────────────
 
     # 1. Rolling early-warning check across the whole test run
-    print("\n========== ANOMALY PREDICTION REPORT ==========")
-    for i in range(1, len(global_errors) + 1):
-        result = early_warning_check(
-            global_errors[:i], mu, sigma,
-            warn_multiplier=1.0,
-            slope_threshold=0.0003,
-            trend_window=15
-        )
-        if result["status"] != "NORMAL":
-            print(f"Window {i:4d} | {result['status']:7s} | {result['reason']}")
+    # print("\n========== ANOMALY PREDICTION REPORT ==========")
+    # for i in range(1, len(global_errors) + 1):
+    #     result = early_warning_check(
+    #         global_errors[:i], mu, sigma,
+    #         warn_multiplier=1.0,
+    #         slope_threshold=0.0003,
+    #         trend_window=15
+    #     )
+    #     if result["status"] != "NORMAL":
+    #         print(f"Window {i:4d} | {result['status']:7s} | {result['reason']}")
 
-    # 2. Predict future errors using the LSTM (if trained)
-    try:
-        future_errors = predict_future_errors(global_errors)
-        print(f"\n--- LSTM Forecast (next {len(future_errors)} windows) ---")
-        for step, val in enumerate(future_errors, 1):
-            level = ("ALARM" if val > mu + 3*sigma
-                     else "WARNING" if val > mu + 2*sigma
-                     else "normal")
-            print(f"  +{step:2d} windows: predicted error = {val:.5f}  [{level}]")
-    except FileNotFoundError:
-        print("\n(No LSTM forecaster found — run train_forecaster() first)")
+    # # 2. Predict future errors using the LSTM (if trained)
+    # try:
+    #     future_errors = predict_future_errors(global_errors)
+    #     print(f"\n--- LSTM Forecast (next {len(future_errors)} windows) ---")
+    #     for step, val in enumerate(future_errors, 1):
+    #         level = ("ALARM" if val > mu + 3*sigma
+    #                  else "WARNING" if val > mu + 2*sigma
+    #                  else "normal")
+    #         print(f"  +{step:2d} windows: predicted error = {val:.5f}  [{level}]")
+    # except FileNotFoundError:
+    #     print("\n(No LSTM forecaster found — run train_forecaster() first)")
 
-    print("================================================\n")
-    # ── END PREDICTION BLOCK ────────────────────────────────────────
+    # print("================================================\n")
+    # # ── END PREDICTION BLOCK ────────────────────────────────────────
 
-    signatures, indices = [], []
+    # signatures, indices = [], []
 
-    for idx, (g, c) in enumerate(zip(global_errors, contributions)):
-        if g > threshold:
-            signatures.append(create_signature(c, g))
-            indices.append(idx)
+    # for idx, (g, c) in enumerate(zip(global_errors, contributions)):
+    #     if g > threshold:
+    #         signatures.append(create_signature(c, g))
+    #         indices.append(idx)
 
-    print(f"Total Anomalies Detected: {len(signatures)}")
-    #  CASE 1: If multiple anomalies → cluster + savepython -m scripts.inference
-    if len(signatures) > 1:
+    # print(f"Total Anomalies Detected: {len(signatures)}")
+    # #  CASE 1: If multiple anomalies → cluster + savepython -m scripts.inference
+    # if len(signatures) > 1:
 
-        # STEP 2: Cluster signatures
-        labels, centroids, sil_score = cluster_signatures(signatures)
+    #     # STEP 2: Cluster signatures
+    #     labels, centroids, sil_score = cluster_signatures(signatures)
 
-        print("Clusters discovered:", len(centroids))
-        print("Silhouette Score:", sil_score)
+    #     print("Clusters discovered:", len(centroids))
+    #     print("Silhouette Score:", sil_score)
 
-        # STEP 3: Save Fault Prototype Library
-        save_fault_library(centroids, sil_score)
-        print("Fault Prototype Library Saved.")
+    #     # STEP 3: Save Fault Prototype Library
+    #     save_fault_library(centroids, sil_score)
+    #     print("Fault Prototype Library Saved.")
 
-    else:
-        print("Not enough anomalies to cluster.")
+    # else:
+    #     print("Not enough anomalies to cluster.")
 
-    # =====================================================
-    # 🔷 STEP 4: CLASSIFY USING EXISTING LIBRARY
-    # =====================================================
-    try:
-        print("\n--- Fault Classification Results ---")
+    # # =====================================================
+    # # 🔷 STEP 4: CLASSIFY USING EXISTING LIBRARY
+    # # =====================================================
+    # try:
+    #     print("\n--- Fault Classification Results ---")
 
-        for i, sig in enumerate(signatures):
-            result = classify_new_signature(sig)
+    #     for i, sig in enumerate(signatures):
+    #         result = classify_new_signature(sig)
 
-            print(f"Anomaly {indices[i]} → {result}")
+    #         print(f"Anomaly {indices[i]} → {result}")
 
-    except Exception as e:
-        print("Fault library not found or classification error:", e)
+    # except Exception as e:
+    #     print("Fault library not found or classification error:", e)
 
     visualize_results(global_errors, per_feature_errors)
+    
+    print("Rows in CSV:", len(df))
+    print("CLIP_LEN:", CLIP_LEN)
+    print("STRIDE:", STRIDE)
 if __name__ == "__main__":
     main()

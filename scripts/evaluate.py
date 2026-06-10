@@ -18,7 +18,7 @@ import json
 def compute_threshold_metrics(global_errors, ground_truth_labels,
                               thresholds=None):
     """
-    Compute F1, MCC, Precision, Recall across multiple thresholds.
+    Compute F1, MCC, Precision, Recall, Specificity, FAR, MDR across multiple thresholds.
     
     Args:
         global_errors: np.array of reconstruction errors
@@ -38,9 +38,17 @@ def compute_threshold_metrics(global_errors, ground_truth_labels,
         mcc = matthews_corrcoef(ground_truth_labels, preds)
         prec = precision_score(ground_truth_labels, preds, zero_division=0)
         rec  = recall_score(ground_truth_labels, preds, zero_division=0)
+        tn, fp, fn, tp = confusion_matrix(
+            ground_truth_labels,
+            preds
+        ).ravel()
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+        far = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+        mdr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
         results.append({
             "threshold": thresh, "f1": f1, "mcc": mcc,
             "precision": prec, "recall": rec,
+            "specificity": specificity, "far": far, "mdr": mdr,
             "n_alarms": preds.sum()
         })
     
@@ -152,13 +160,12 @@ def plot_roc_pr_curves(curves_dict_list, labels,
 
 def main():
     # Load your model's errors
-    errors = pd.read_csv("results/test_errors.csv")
-    global_errors = errors["errors"].values
+    errors = pd.read_csv("results/global_reconstruction_error.csv")
+    global_errors = errors["global_reconstruction_error"].values
     
     # *** YOU MUST PROVIDE GROUND TRUTH LABELS ***
     # If you don't have labeled test data, use fault injection timestamps
     # or a labeled hold-out dataset from the motor manufacturer
-    ground_truth = np.load("data/labels/test_labels.npy")
     ground_truth = np.load("data/labels/test_labels.npy")
 
     # Fix off-by-one — trim to same length
@@ -180,6 +187,9 @@ def main():
     print(f"  MCC:                {best['mcc']:.4f}")
     print(f"  Precision:          {best['precision']:.4f}")
     print(f"  Recall:             {best['recall']:.4f}")
+    print(f"  Specificity:        {best['specificity']:.4f}")
+    print(f"  False Alarm Rate:   {best['far']:.4f}")
+    print(f"  Miss Detection:     {best['mdr']:.4f}")
     
     # 2. ROC-AUC and PR-AUC
     curves = compute_roc_pr(global_errors, ground_truth)
@@ -205,6 +215,9 @@ def main():
         "mcc": float(best['mcc']),
         "precision": float(best['precision']),
         "recall": float(best['recall']),
+        "specificity": float(best['specificity']),
+        "far": float(best['far']),
+        "mdr": float(best['mdr']),
         "roc_auc": float(curves['roc_auc']),
         "pr_auc": float(curves['pr_auc']),
         "roc_auc_ci_95": [float(auc_lo), float(auc_hi)],

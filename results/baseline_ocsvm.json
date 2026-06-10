@@ -1,9 +1,13 @@
 {
   "method": "One-Class SVM",
-  "roc_auc": 0.7894,
-  "pr_auc": 0.7925,
-  "f1": 0.2803,
-  "mcc": 0.3314,
-  "precision": 1.0,
-  "recall": 0.163
+  "roc_auc": 0.9399,
+  "pr_auc": 0.7606,
+  "f1": 0.5026,
+  "mcc": 0.5054,
+  "precision": 0.8235,
+  "recall": 0.3616,
+  "fpr": 0.0122,
+  "mdr": 0.6384,
+  "specificity": 0.9878,
+  "best_threshold": -0.8133
 }

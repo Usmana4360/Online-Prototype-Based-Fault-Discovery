@@ -1,9 +1,13 @@
 {
   "method": "Isolation Forest",
-  "roc_auc": 0.7794,
-  "pr_auc": 0.7761,
-  "f1": 0.3023,
-  "mcc": 0.3474,
-  "precision": 1.0,
-  "recall": 0.1781
+  "roc_auc": 0.9795,
+  "pr_auc": 0.9056,
+  "f1": 0.6085,
+  "mcc": 0.6184,
+  "precision": 0.9385,
+  "recall": 0.4502,
+  "fpr": 0.0047,
+  "mdr": 0.5498,
+  "specificity": 0.9953,
+  "best_threshold": 0.4464
 }

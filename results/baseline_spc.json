@@ -1,9 +1,12 @@
 {
   "method": "3-Sigma SPC",
-  "roc_auc": 0.5039,
-  "pr_auc": 0.0372,
-  "f1": 0.0688,
-  "mcc": 0.0029,
-  "precision": 0.0359,
-  "recall": 0.831
+  "roc_auc": 0.9685,
+  "pr_auc": 0.7672,
+  "f1": 0.2832,
+  "mcc": 0.1827,
+  "precision": 0.1649,
+  "recall": 1.0,
+  "fpr": 0.7977,
+  "mdr": 0.0,
+  "specificity": 0.2023
 }

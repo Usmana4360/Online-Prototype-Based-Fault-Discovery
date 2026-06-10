@@ -1,72 +1,150 @@
 # scripts/baseline_iforest.py
+
 import numpy as np
 import pandas as pd
 import joblib
+import json
+
 from sklearn.ensemble import IsolationForest
 from sklearn.metrics import (
-    roc_auc_score, average_precision_score,
-    f1_score, matthews_corrcoef,
-    precision_score, recall_score
+    roc_auc_score,
+    average_precision_score,
+    f1_score,
+    matthews_corrcoef,
+    precision_score,
+    recall_score,
+    confusion_matrix
 )
-import json
+
 from src.config import FEATURE_COLS, CLIP_LEN, STRIDE
 
-CSV_PATH  = "data/raw/motor_data_200_drifts_labeled.csv"
+CSV_PATH = "data/raw/motor_data_200_drifts_labeled.csv"
 
+
+# =====================================
+# MAIN
+# =====================================
 def main():
-    df     = pd.read_csv(CSV_PATH)
+
+    # -----------------------------
+    # Load data
+    # -----------------------------
+    df = pd.read_csv(CSV_PATH)
     labels = np.load("data/labels/test_labels.npy")
 
-    feature_data  = df[FEATURE_COLS].values
+    feature_data = df[FEATURE_COLS].values
     window_starts = list(range(0, len(df) - CLIP_LEN + 1, STRIDE))
 
-    # Flatten each window to a feature vector
+    # -----------------------------
+    # Build sliding windows
+    # -----------------------------
     windows = np.array([
         feature_data[s:s + CLIP_LEN].flatten()
         for s in window_starts
     ])
 
-    # Train on first 70% of windows
-    n_train      = int(0.70 * len(windows))
+    # -----------------------------
+    # Train split
+    # -----------------------------
+    n_train = int(0.70 * len(windows))
     train_windows = windows[:n_train]
 
+    # -----------------------------
+    # Model
+    # -----------------------------
     iso = IsolationForest(
         n_estimators=100,
         contamination=0.05,
         random_state=42
     )
+
     iso.fit(train_windows)
 
-    # Anomaly score: higher = more anomalous
-    scores = -iso.score_samples(windows)
+    # -----------------------------
+    # Anomaly scores
+    # -----------------------------
+    scores = -iso.score_samples(windows)  # higher = more anomalous
 
-    # Align lengths
+    # Align
     min_len = min(len(scores), len(labels))
-    scores  = scores[:min_len]
-    labels  = labels[:min_len]
+    scores = scores[:min_len]
+    labels = labels[:min_len]
 
-    # Threshold at 95th percentile of training scores
+    np.save("results/scores_iforest.npy", scores)
+
+    # -----------------------------
+    # Threshold (95th percentile)
+    # -----------------------------
     train_scores = scores[:n_train]
-    threshold    = np.percentile(train_scores, 95)
-    preds        = (scores > threshold).astype(int)
+    threshold = np.percentile(train_scores, 95)
 
+    preds = (scores > threshold).astype(int)
+
+    # =============================
+    # CONFUSION MATRIX METRICS
+    # =============================
+    tn, fp, fn, tp = confusion_matrix(labels, preds).ravel()
+
+    # -----------------------------
+    # Core metrics
+    # -----------------------------
+    roc_auc = roc_auc_score(labels, scores)
+    pr_auc = average_precision_score(labels, scores)
+
+    f1 = f1_score(labels, preds, zero_division=0)
+    mcc = matthews_corrcoef(labels, preds)
+    precision = precision_score(labels, preds, zero_division=0)
+    recall = recall_score(labels, preds, zero_division=0)
+
+    # -----------------------------
+    # NEW: Industrial metrics
+    # -----------------------------
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+    mdr = fn / (fn + tp) if (fn + tp) > 0 else 0
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+
+    # -----------------------------
+    # Final results dictionary
+    # -----------------------------
     results = {
-        "method"   : "Isolation Forest",
-        "roc_auc"  : round(roc_auc_score(labels, scores), 4),
-        "pr_auc"   : round(average_precision_score(labels, scores), 4),
-        "f1"       : round(f1_score(labels, preds, zero_division=0), 4),
-        "mcc"      : round(matthews_corrcoef(labels, preds), 4),
-        "precision": round(precision_score(labels, preds, zero_division=0), 4),
-        "recall"   : round(recall_score(labels, preds, zero_division=0), 4),
+        "method": "Isolation Forest",
+
+        "roc_auc": round(roc_auc, 4),
+        "pr_auc": round(pr_auc, 4),
+
+        "f1": round(f1, 4),
+        "mcc": round(mcc, 4),
+
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+
+        # NEW METRICS
+        "fpr": round(fpr, 4),
+        "mdr": round(mdr, 4),
+        "specificity": round(specificity, 4),
+
+        "best_threshold": round(threshold, 4)
     }
 
+    # -----------------------------
+    # Print results
+    # -----------------------------
     print("\nIsolation Forest Baseline Results:")
+    print("=" * 50)
     for k, v in results.items():
-        print(f"  {k:<12}: {v}")
+        print(f"{k:<15}: {v}")
 
+    # -----------------------------
+    # Save JSON
+    # -----------------------------
     with open("results/baseline_iforest.json", "w") as f:
         json.dump(results, f, indent=2)
-    print("Saved: results/baseline_iforest.json")
 
+    print("\nSaved: results/baseline_iforest.json")
+
+
+# =====================================
+# RUN
+# =====================================
 if __name__ == "__main__":
     main()
