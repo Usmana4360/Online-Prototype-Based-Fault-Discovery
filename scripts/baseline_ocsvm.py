@@ -86,8 +86,15 @@ def main():
 
     # Align lengths
     min_len = min(len(scores), len(labels))
+<<<<<<< HEAD
     scores = scores[:min_len]
     labels = labels[:min_len]
+=======
+    scores  = scores[:min_len]
+    labels  = labels[:min_len]
+    np.save("results/scores_ocsvm.npy", scores)
+
+>>>>>>> 4d70ebf3cee358a6add21cb775943ad730662ff2
 
     np.save("results/scores_ocsvm.npy", scores)
 
@@ -125,6 +132,7 @@ def main():
     # Results dictionary
     # -----------------------------
     results = {
+<<<<<<< HEAD
         "method": "One-Class SVM",
 
         "roc_auc": round(roc_auc, 4),
@@ -142,6 +150,15 @@ def main():
         "specificity": round(specificity, 4),
 
         "best_threshold": round(threshold, 4)
+=======
+        "method"   : "One-Class SVM",
+        "roc_auc"  : round(roc_auc_score(labels, scores), 4),
+        "pr_auc"   : round(average_precision_score(labels, scores), 4),
+        "f1"       : round(f1_score(labels, preds, zero_division=0), 4),
+        "mcc"      : round(matthews_corrcoef(labels, preds), 4),
+        "precision": round(precision_score(labels, preds, zero_division=0), 4),
+        "recall"   : round(recall_score(labels, preds, zero_division=0), 4)
+>>>>>>> 4d70ebf3cee358a6add21cb775943ad730662ff2
     }
 
     # -----------------------------

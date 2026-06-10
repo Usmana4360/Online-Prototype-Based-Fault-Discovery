@@ -64,8 +64,17 @@ def main():
     for i, start in enumerate(window_starts):
         window = feature_data[start:start + CLIP_LEN]
 
+<<<<<<< HEAD
         z = np.abs((window - mu) / sigma)
         scores[i] = z.max()  # worst deviation in window
+=======
+    # Align lengths
+    min_len  = min(len(scores), len(labels))
+    scores   = scores[:min_len]
+    labels   = labels[:min_len]
+    np.save("results/scores_spc.npy", scores)
+
+>>>>>>> 4d70ebf3cee358a6add21cb775943ad730662ff2
 
     # -----------------------------
     # Alignment check

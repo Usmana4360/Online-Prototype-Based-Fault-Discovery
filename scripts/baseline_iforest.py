@@ -67,8 +67,14 @@ def main():
 
     # Align
     min_len = min(len(scores), len(labels))
+<<<<<<< HEAD
     scores = scores[:min_len]
     labels = labels[:min_len]
+=======
+    scores  = scores[:min_len]
+    labels  = labels[:min_len]
+    np.save("results/scores_iforest.npy", scores)
+>>>>>>> 4d70ebf3cee358a6add21cb775943ad730662ff2
 
     np.save("results/scores_iforest.npy", scores)
 
